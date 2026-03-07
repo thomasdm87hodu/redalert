@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Israel Real-Time Red Alert Radar</title>
+    
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    
+    <style>
+        /* Map Container */
+        #map {
+            width: 100%;
+            height: 100%;
+            background-color: #0b0c10;
+        }
+
+        /* Radar Pulse Animations */
+        .radar-blip-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        .radar-blip {
+            width: 12px;
+            height: 12px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            position: absolute;
+            box-shadow: 0 0 10px #ef4444, 0 0 20px #ef4444;
+            z-index: 10;
+        }
+
+        .radar-pulse-1, .radar-pulse-2 {
+            content: "";
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: radar-ping 2.5s infinite ease-out;
+            z-index: 5;
+        }
+
+        .radar-pulse-2 {
+            animation-delay: 1.25s;
+        }
+
+        @keyframes radar-ping {
+            0% { 
+                transform: scale(0.5); 
+                opacity: 1; 
+                border: 2px solid #ef4444; 
+                background: rgba(239, 68, 68, 0.8); 
+            }
+            100% { 
+                transform: scale(15); 
+                opacity: 0; 
+                border: 1px solid #ef4444; 
+                background: transparent; 
+            }
+        }
+
+        /* UI Animations */
+        @keyframes flash-bg {
+            0%, 100% { background-color: rgba(127, 29, 29, 0.4); border-color: rgba(239, 68, 68, 0.5); }
+            50% { background-color: rgba(239, 68, 68, 0.8); border-color: rgba(239, 68, 68, 1); }
+        }
+        
+        .animate-flash {
+            animation: flash-bg 1s ease-in-out 3;
+        }
+
+        /* Network Pulse */
+        @keyframes net-pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .net-activity {
+            animation: net-pulse 0.5s ease-out;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white h-screen w-screen overflow-hidden relative">
+
+    <!-- Background Map -->
+    <div id="map" class="absolute inset-0 z-0"></div>
+
+    <!-- UI Overlay Panel -->
+    <div class="absolute top-4 left-4 z-10 w-80 sm:w-96 bg-gray-900 bg-opacity-90 rounded-xl shadow-2xl border border-gray-700 backdrop-blur-md flex flex-col overflow-hidden">
+        <!-- Header -->
+        <div class="bg-red-700 p-4 flex items-center justify-between shadow-md">
+            <h1 class="text-white font-bold text-lg flex items-center gap-3">
+                <span class="relative flex h-3 w-3">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-200 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                </span>
+                Live Alert Radar
+            </h1>
+            <div id="network-indicator" class="h-2 w-2 rounded-full bg-green-400 opacity-50 transition-all duration-200" title="Network Activity"></div>
+        </div>
+        
+        <div class="p-5 flex flex-col gap-4">
+            <!-- Connection Status -->
+            <div class="flex flex-col gap-1 text-sm border-b border-gray-700 pb-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Official Alert Network (Oref):</span>
+                    <span id="oref-status" class="text-yellow-400 font-mono text-xs">Connecting...</span>
+                </div>
+            </div>
+            
+            <!-- Alert Feed -->
+            <div class="pt-1 flex-1 flex flex-col">
+                <h2 class="text-xs text-gray-400 mb-3 uppercase tracking-wider font-semibold">Real-Time Active Alerts</h2>
+                <ul id="alerts-list" class="space-y-2 max-h-48 overflow-y-auto">
+                    <li class="text-gray-500 text-sm italic py-2" id="no-alerts-msg">No active threats detected.</li>
+                </ul>
+            </div>
+            
+            <!-- Manual Controls for Demo -->
+            <div class="border-t border-gray-700 pt-4 mt-1">
+                <button onclick="simulateAlert()" class="w-full bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 shadow-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-300" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                    </svg>
+                    Simulate Radar Alert
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Modal -->
+    <div id="debug-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
+        <div class="bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-11/12 max-w-md p-5 flex flex-col gap-4">
+            <div class="flex justify-between items-center border-b border-gray-700 pb-2">
+                <h3 class="text-red-400 font-bold text-lg">Connection Debug Info</h3>
+                <button onclick="closeDebug()" class="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <pre id="debug-content" class="text-xs text-gray-300 font-mono whitespace-pre-wrap bg-gray-900 p-3 rounded overflow-x-auto border border-gray-700"></pre>
+            <button onclick="closeDebug()" class="bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-md transition-colors text-sm font-semibold mt-2">Close Debugger</button>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // --- 1. INITIALIZE MAP (Dark Tactical Theme) ---
+        const map = L.map('map', { zoomControl: false }).setView([31.5, 34.8], 8);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(map);
+
+        // --- 2. COORDINATES DICTIONARY ---
+        const cityCoordinates = {
+‎            "תל אביב - יפו": [32.0853, 34.7818], "חיפה": [32.7940, 34.9896], "ירושלים": [31.7683, 35.2137],
+‎            "שדרות": [31.5235, 34.5947], "אשקלון": [31.6693, 34.5715], "אשדוד": [31.8044, 34.6553],
+‎            "באר שבע": [31.2518, 34.7913], "נתיבות": [31.4158, 34.5878], "אופקים": [31.3129, 34.6208],
+‎            "קרית שמונה": [33.2073, 35.5697], "מטולה": [33.2798, 35.5786], "נהריה": [33.0084, 35.0933],
+‎            "צפת": [32.9646, 35.4960], "טבריה": [32.7945, 35.5333], "עפולה": [32.6066, 35.2880],
+‎            "חדרה": [32.4340, 34.9197], "נתניה": [32.3215, 34.8532], "הרצליה": [32.1624, 34.8447],
+‎            "ראשון לציון": [31.9730, 34.7925], "רחובות": [31.8928, 34.8113], "מודיעין": [31.8903, 35.0064],
+‎            "בית שמש": [31.7455, 34.9867], "אילת": [29.5581, 34.9482]
+        };
+
+        // --- 3. AUDIO ENGINE ---
+        let audioCtx;
+        let audioContextEnabled = false;
+
+        function initAudio() {
+            if (!audioContextEnabled) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                audioContextEnabled = true;
+            }
+        }
+        document.addEventListener('click', initAudio, { once: true });
+
+        function playBeep() {
+            if (!audioContextEnabled || !audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(850, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.35);
+            
+            gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.35);
+        }
+
+        // --- 4. ALERT LOGIC & UI UPDATES ---
+        const activeMarkers = new Map();
+        const recentAlerts = new Set(); // Prevent duplicate triggers
+
+        function flashNetworkIndicator() {
+            const indicator = document.getElementById('network-indicator');
+            indicator.classList.remove('net-activity');
+            void indicator.offsetWidth; // trigger reflow
+            indicator.classList.add('net-activity');
+        }
+
+        function getCoords(cityName) {
+            if (cityCoordinates[cityName]) return cityCoordinates[cityName];
+            for (let knownCity in cityCoordinates) {
+                let mainPart = knownCity.split(' - ')[0].trim();
+                if (cityName.includes(mainPart) || knownCity.includes(cityName)) {
+                    return cityCoordinates[knownCity];
+                }
+            }
+            // Fallback: Randomize slightly around center of Israel
+            return [31.5 + (Math.random() * 1.5 - 0.75), 34.8 + (Math.random() * 0.5 - 0.25)];
+        }
+
+        function updateAlertUI(cityName) {
+            const list = document.getElementById('alerts-list');
+            const noAlerts = document.getElementById('no-alerts-msg');
+            if (noAlerts) noAlerts.style.display = 'none';
+
+            const existing = document.getElementById('alert-item-' + cityName);
+            if (existing) existing.remove();
+
+            const li = document.createElement('li');
+            li.id = 'alert-item-' + cityName;
+            li.className = 'bg-red-900 bg-opacity-40 border border-red-500 rounded-md p-3 text-sm text-white flex justify-between items-center animate-flash shadow-md';
+            
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            li.innerHTML = `<span class="font-bold tracking-wide">${cityName}</span><span class="text-xs text-red-300 font-mono">${time}</span>`;
+            list.insertBefore(li, list.firstChild);
+        }
+
+        function removeAlertUI(cityName) {
+            const existing = document.getElementById('alert-item-' + cityName);
+            if (existing) existing.remove();
+            
+            const list = document.getElementById('alerts-list');
+            if (list.children.length === 0 || (list.children.length === 1 && list.children[0].id === 'no-alerts-msg')) {
+                const noAlerts = document.getElementById('no-alerts-msg');
+                if (noAlerts) noAlerts.style.display = 'block';
+            }
+        }
+
+        function triggerAlert(cityName) {
+            if (activeMarkers.has(cityName)) {
+                clearTimeout(activeMarkers.get(cityName).timeout);
+                activeMarkers.get(cityName).marker.remove();
+                activeMarkers.delete(cityName);
+            }
+            
+            const coords = getCoords(cityName);
+            const icon = L.divIcon({
+                className: 'radar-blip-container',
+                html: `<div class="radar-pulse-1"></div><div class="radar-pulse-2"></div><div class="radar-blip"></div>`,
+                iconSize: [24, 24]
+            });
+
+            const marker = L.marker(coords, { icon }).addTo(map);
+            map.flyTo(coords, Math.max(map.getZoom(), 10), { duration: 1.5 });
+
+            updateAlertUI(cityName);
+            playBeep();
+
+            const timeout = setTimeout(() => {
+                marker.remove();
+                activeMarkers.delete(cityName);
+                removeAlertUI(cityName);
+            }, 45000); // clear after 45 seconds
+
+            activeMarkers.set(cityName, { marker, timeout });
+        }
+
+        function simulateAlert() {
+            initAudio(); 
+            const cities = Object.keys(cityCoordinates);
+            const randomCity = cities[Math.floor(Math.random() * cities.length)];
+            processIncomingData([randomCity]);
+        }
+
+        // Central payload processor
+        function processIncomingData(citiesArray) {
+            if (!citiesArray || !Array.isArray(citiesArray) || citiesArray.length === 0) return;
+            flashNetworkIndicator();
+            
+            citiesArray.forEach(city => {
+                let cityName = typeof city === 'string' ? city : (city.name || city.zone || "");
+                if (cityName && !recentAlerts.has(cityName)) {
+                    recentAlerts.add(cityName);
+                    triggerAlert(cityName);
+                    // Prevent duplicate processing of the exact same city for 60 seconds
+                    setTimeout(() => recentAlerts.delete(cityName), 60000); 
+                }
+            });
+        }
+
+        // --- 5. OREF OFFICIAL POLLING ENGINE ---
+
+        let lastErrorDetails = "No errors recorded yet.";
+
+        function showDebug() {
+            document.getElementById('debug-content').textContent = lastErrorDetails;
+            document.getElementById('debug-modal').classList.remove('hidden');
+        }
+
+        function closeDebug() {
+            document.getElementById('debug-modal').classList.add('hidden');
+        }
+
+        // Official Home Front Command (Oref) via Custom Vercel Proxy
+        async function pollOrefAPI() {
+            const statusEl = document.getElementById('oref-status');
+            try {
+                // Call our own dedicated Vercel serverless backend
+                const response = await fetch('/api/proxy', { 
+                    method: 'GET',
+                    cache: 'no-store' 
+                });
+
+                if (response.ok) {
+                    const textData = await response.text();
+                    
+                    // Oref returns empty string when there are no alerts
+                    if (textData && textData.trim().length > 0) {
+                        try {
+                            const data = JSON.parse(textData);
+                            if (data && data.data && Array.isArray(data.data)) {
+                                processIncomingData(data.data);
+                            }
+                        } catch(e) {
+                            // Ignored: Data isn't JSON or is malformed html
+                        }
+                    }
+                    statusEl.innerHTML = 'OK (Live)';
+                    statusEl.className = 'text-green-400 font-mono text-xs';
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (err) {
+                const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+                lastErrorDetails = `[${time}] Fetch Error:\n${err.message}\n\nOur custom Vercel backend had trouble reaching Oref. This usually resolves automatically in a few seconds.\n\nStatus: Retrying...`;
+                
+                statusEl.innerHTML = `Error (Retrying) <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
+                statusEl.className = 'text-red-400 font-mono text-xs';
+            }
+        }
+
+        // Run Polling Engine
+        setInterval(pollOrefAPI, 2500); // Check API every 2.5 seconds
+
+        // Initial Ping
+        pollOrefAPI();
+
+    </script>
+</body>
+</html>
