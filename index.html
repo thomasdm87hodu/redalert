@@ -313,7 +313,7 @@
             });
         }
 
-        // --- 5. WATERFALL POLLING ENGINE (WAF Bypass & Anti-Hang) ---
+        // --- 5. WATERFALL POLLING ENGINE (WAF Bypass & Tzofar Redundancy) ---
         let lastErrorDetails = "No errors recorded yet.";
         let currentEndpointIndex = 0;
         let isPolling = false; // Concurrency lock to prevent overlapping fetch jams
@@ -326,15 +326,8 @@
         function closeDebug() {
             document.getElementById('debug-modal').classList.add('hidden');
         }
-        
-        // Helper to safely extract proxy names without crashing on relative URLs
-        function getProxyName(url) {
-            if (url.startsWith('/')) return 'Vercel API';
-            try { return new URL(url).hostname; } catch(e) { return 'Unknown Proxy'; }
-        }
 
         async function pollOrefAPI() {
-            // Prevent overlapping queries if a request is taking a long time
             if (isPolling) return;
             isPolling = true;
 
@@ -348,54 +341,81 @@
             const encodedOrefUrl = encodeURIComponent(targetOrefUrl);
             const cacheBuster = new Date().getTime(); 
             
+            // The ultimate 4-layer redundancy array
             const fetchEndpoints = [
-                `/api/proxy?t=${cacheBuster}`, // 1. Custom Vercel Backend
-                `https://api.allorigins.win/raw?url=${encodedOrefUrl}&disableCache=true`, // 2. AllOrigins
-                `https://api.codetabs.com/v1/proxy?quest=${encodedOrefUrl}` // 3. CodeTabs
+                { url: `/api/proxy?t=${cacheBuster}`, type: 'raw', name: 'Vercel API' },
+                { url: `https://api.allorigins.win/get?url=${encodedOrefUrl}&disableCache=true`, type: 'allorigins_wrapper', name: 'AllOrigins Proxy' },
+                { url: `https://api.tzevaadom.co.il/notifications?t=${cacheBuster}`, type: 'tzofar', name: 'Tzofar Redundancy' },
+                { url: `https://api.codetabs.com/v1/proxy?quest=${encodedOrefUrl}`, type: 'raw', name: 'CodeTabs Proxy' }
             ];
 
             for (let i = 0; i < fetchEndpoints.length; i++) {
                 let attemptIndex = (currentEndpointIndex + i) % fetchEndpoints.length;
-                let currentUrl = fetchEndpoints[attemptIndex];
-                let proxyName = getProxyName(currentUrl);
+                let current = fetchEndpoints[attemptIndex];
 
                 try {
-                    // INCREASED TIMEOUT: 4 seconds allows Vercel cold-starts and proxies to respond
+                    // Increased to 4.5 seconds for maximum cold-start leniency
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 4000);
+                    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-                    const response = await fetch(currentUrl, { 
+                    const response = await fetch(current.url, { 
                         method: 'GET',
                         cache: 'no-store',
                         headers: {
                             'Cache-Control': 'no-cache',
                             'Pragma': 'no-cache'
                         },
-                        signal: controller.signal // Bind the timeout
+                        signal: controller.signal
                     });
 
                     clearTimeout(timeoutId);
 
                     if (response.ok) {
-                        responseText = await response.text();
+                        let rawText = await response.text();
                         
-                        if (responseText.trim().toLowerCase().startsWith('<')) {
-                            throw new Error('Blocked by Oref Firewall (HTML Response)');
+                        // FIX 1: Safely unpack the AllOrigins JSON wrapper to bypass CORS crashes
+                        if (current.type === 'allorigins_wrapper') {
+                            const wrapper = JSON.parse(rawText);
+                            if (wrapper.status && wrapper.status.http_code !== 200 && wrapper.status.http_code !== 304) {
+                                throw new Error(`Target returned HTTP ${wrapper.status.http_code}`);
+                            }
+                            rawText = wrapper.contents || "";
                         }
 
-                        if (responseText && responseText.trim().length > 0) {
-                            parsedData = JSON.parse(responseText); 
+                        // Catch strict HTML firewall blocks
+                        if (rawText.trim().toLowerCase().startsWith('<')) {
+                            throw new Error('Blocked by Firewall (HTML Response)');
+                        }
+
+                        // Process actual data if not empty
+                        if (rawText && rawText.trim().length > 0) {
+                            const jsonData = JSON.parse(rawText); 
+                            
+                            // FIX 2: Handle Tzofar's different JSON structure
+                            if (current.type === 'tzofar') {
+                                let tzCities = [];
+                                if (Array.isArray(jsonData)) {
+                                    jsonData.forEach(item => {
+                                        if (item.cities) tzCities.push(...item.cities);
+                                        else if (item.data) tzCities.push(...item.data);
+                                    });
+                                }
+                                parsedData = { data: tzCities };
+                            } else {
+                                // Standard Oref formatting
+                                parsedData = jsonData;
+                            }
                         }
 
                         success = true;
                         currentEndpointIndex = attemptIndex; 
                         break; 
                     } else {
-                        errors.push(`[${proxyName}]: HTTP ${response.status}`);
+                        errors.push(`[${current.name}]: HTTP ${response.status}`);
                     }
                 } catch (err) {
-                    let errMessage = err.name === 'AbortError' ? 'Connection Timed Out (Hanging)' : err.message;
-                    errors.push(`[${proxyName}]: ${errMessage}`);
+                    let errMessage = err.name === 'AbortError' ? 'Timeout (Hanging)' : err.message;
+                    errors.push(`[${current.name}]: ${errMessage}`);
                 }
             }
 
@@ -407,17 +427,16 @@
                 statusEl.className = 'text-green-400 font-mono text-xs';
             } else {
                 const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-                lastErrorDetails = `[${time}] System Failure:\nAll connection proxies failed or timed out.\n\nDetails:\n${errors.join('\n')}\n\nThe system will continue trying to rotate through available gateways.`;
+                lastErrorDetails = `[${time}] System Failure:\nAll connection gateways failed or timed out.\n\nDetails:\n${errors.join('\n')}\n\nThe system will continue trying to rotate through available gateways.`;
                 
                 statusEl.innerHTML = `Error (Retrying) <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
                 statusEl.className = 'text-red-400 font-mono text-xs';
             }
 
-            // Release the lock so the next interval can run
             isPolling = false;
         }
 
-        // Run Polling Engine (Ping every 3 seconds to account for the slightly longer timeout allowance)
+        // Run Polling Engine
         setInterval(pollOrefAPI, 3000);
         pollOrefAPI();
 
