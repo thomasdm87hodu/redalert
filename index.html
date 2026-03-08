@@ -116,7 +116,7 @@
             <!-- Connection Status -->
             <div class="flex flex-col gap-1 text-sm border-b border-gray-700 pb-3">
                 <div class="flex items-center justify-between">
-                    <span class="text-gray-400">Official Alert Network (Oref):</span>
+                    <span class="text-gray-400">Alert Network Status:</span>
                     <span id="oref-status" class="text-yellow-400 font-mono text-xs">Connecting...</span>
                 </div>
             </div>
@@ -313,8 +313,9 @@
             });
         }
 
-        // --- 5. OREF OFFICIAL POLLING ENGINE (Vercel Backend) ---
+        // --- 5. WATERFALL POLLING ENGINE ---
         let lastErrorDetails = "No errors recorded yet.";
+        let currentEndpointIndex = 0;
 
         function showDebug() {
             document.getElementById('debug-content').textContent = lastErrorDetails;
@@ -325,36 +326,63 @@
             document.getElementById('debug-modal').classList.add('hidden');
         }
 
+        // We cycle through multiple proxies to ensure maximum uptime and bypass geo-blocks
+        const targetOrefUrl = encodeURIComponent('https://www.oref.org.il/WarningMessages/alert/alerts.json');
+        const fetchEndpoints = [
+            '/api/proxy', // Primary: Your custom Vercel backend
+            `https://api.allorigins.win/raw?url=${targetOrefUrl}`, // Fallback 1
+            `https://api.codetabs.com/v1/proxy?quest=${targetOrefUrl}` // Fallback 2
+        ];
+
         async function pollOrefAPI() {
             const statusEl = document.getElementById('oref-status');
-            try {
-                // Call our dedicated Vercel serverless backend
-                const response = await fetch('/api/proxy', { 
-                    method: 'GET',
-                    cache: 'no-store' 
-                });
+            let success = false;
+            let responseText = "";
+            let errors = [];
 
-                if (response.ok) {
-                    const textData = await response.text();
-                    
-                    if (textData && textData.trim().length > 0) {
-                        try {
-                            const data = JSON.parse(textData);
-                            if (data && data.data && Array.isArray(data.data)) {
-                                processIncomingData(data.data);
-                            }
-                        } catch(e) {
-                            // Ignored
-                        }
+            // Try the current preferred endpoint
+            for (let i = 0; i < fetchEndpoints.length; i++) {
+                // Determine which endpoint to try (start with the one that worked last time)
+                let attemptIndex = (currentEndpointIndex + i) % fetchEndpoints.length;
+                let currentUrl = fetchEndpoints[attemptIndex];
+
+                try {
+                    const response = await fetch(currentUrl, { 
+                        method: 'GET',
+                        cache: 'no-store' 
+                    });
+
+                    if (response.ok) {
+                        responseText = await response.text();
+                        success = true;
+                        currentEndpointIndex = attemptIndex; // Save the successful endpoint for the next run
+                        break; // Stop trying proxies
+                    } else {
+                        errors.push(`[${currentUrl}]: HTTP ${response.status}`);
                     }
-                    statusEl.innerHTML = 'OK (Live)';
-                    statusEl.className = 'text-green-400 font-mono text-xs';
-                } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                } catch (err) {
+                    errors.push(`[${currentUrl}]: ${err.message}`);
                 }
-            } catch (err) {
+            }
+
+            if (success) {
+                // Parse the successful response
+                if (responseText && responseText.trim().length > 0) {
+                    try {
+                        const data = JSON.parse(responseText);
+                        if (data && data.data && Array.isArray(data.data)) {
+                            processIncomingData(data.data);
+                        }
+                    } catch(e) {
+                        // Ignored formatting issues
+                    }
+                }
+                statusEl.innerHTML = `OK (Live) <span class="text-gray-500 text-[10px] ml-1">E${currentEndpointIndex+1}</span>`;
+                statusEl.className = 'text-green-400 font-mono text-xs';
+            } else {
+                // If ALL endpoints failed, display the error state
                 const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-                lastErrorDetails = `[${time}] Fetch Error:\n${err.message}\n\nOur custom Vercel backend had trouble reaching Oref. This usually resolves automatically in a few seconds.\n\nStatus: Retrying...`;
+                lastErrorDetails = `[${time}] System Failure:\nAll connection proxies failed.\n\nDetails:\n${errors.join('\n')}\n\nOref blocks IP ranges dynamically. The system will continue trying to rotate through available gateways.`;
                 
                 statusEl.innerHTML = `Error (Retrying) <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
                 statusEl.className = 'text-red-400 font-mono text-xs';
