@@ -417,16 +417,19 @@
                 }
             }
 
-            // Smart Regional Fallbacks (If exact village isn't mapped, place radar in the correct general region)
-            if (cityName.includes('גליל') || cityName.includes('צפת') || cityName.includes('שמונה')) return [33.0 + (Math.random() * 0.2), 35.3 + (Math.random() * 0.2)];
-            if (cityName.includes('גולן') || cityName.includes('קצרין')) return [33.0 + (Math.random() * 0.2), 35.7 + (Math.random() * 0.1)];
-            if (cityName.includes('עזה') || cityName.includes('שדרות') || cityName.includes('אשקלון')) return [31.4 + (Math.random() * 0.2), 34.5 + (Math.random() * 0.1)];
-            if (cityName.includes('נגב') || cityName.includes('באר שבע')) return [31.0 + (Math.random() * 0.5), 34.8 + (Math.random() * 0.2)];
-            if (cityName.includes('לכיש')) return [31.6 + (Math.random() * 0.2), 34.7 + (Math.random() * 0.2)];
-            if (cityName.includes('אילת')) return [29.55, 34.95];
+            // Smart Regional Fallbacks (Tightened to stay on land)
+            if (cityName.includes('גליל') || cityName.includes('צפת') || cityName.includes('שמונה')) return [32.9 + (Math.random() * 0.2), 35.3 + (Math.random() * 0.2)];
+            if (cityName.includes('גולן') || cityName.includes('קצרין')) return [33.0 + (Math.random() * 0.2), 35.6 + (Math.random() * 0.2)];
+            if (cityName.includes('עזה') || cityName.includes('שדרות') || cityName.includes('אשקלון')) return [31.4 + (Math.random() * 0.1), 34.55 + (Math.random() * 0.1)];
+            if (cityName.includes('נגב') || cityName.includes('באר שבע')) return [31.1 + (Math.random() * 0.3), 34.8 + (Math.random() * 0.2)];
+            if (cityName.includes('לכיש')) return [31.55 + (Math.random() * 0.1), 34.75 + (Math.random() * 0.1)];
+            if (cityName.includes('שרון') || cityName.includes('נתניה')) return [32.3 + (Math.random() * 0.1), 34.9 + (Math.random() * 0.1)];
+            if (cityName.includes('דן') || cityName.includes('תל אביב')) return [32.0 + (Math.random() * 0.1), 34.85 + (Math.random() * 0.1)];
+            if (cityName.includes('יהודה') || cityName.includes('שומרון') || cityName.includes('ירושלים')) return [31.8 + (Math.random() * 0.4 - 0.2), 35.2 + (Math.random() * 0.1)];
+            if (cityName.includes('אילת') || cityName.includes('ערבה')) return [29.6 + (Math.random() * 0.3), 35.0 + (Math.random() * 0.1)];
 
-            // Default random spread across central Israel
-            return [31.5 + (Math.random() * 1.5 - 0.75), 34.8 + (Math.random() * 0.5 - 0.25)];
+            // Default random spread strictly bound to central INLAND Israel
+            return [31.75 + (Math.random() * 0.2 - 0.1), 34.95 + (Math.random() * 0.1)];
         }
 
         function updateAlertUI(cityName, alertId) {
