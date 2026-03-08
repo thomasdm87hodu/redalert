@@ -109,7 +109,21 @@
                 </span>
                 Live Alert Radar
             </h1>
-            <div id="network-indicator" class="h-2 w-2 rounded-full bg-green-400 opacity-50 transition-all duration-200" title="Network Activity"></div>
+            
+            <div class="flex items-center gap-3">
+                <!-- Sound Toggle Button -->
+                <button id="sound-toggle" onclick="toggleSound()" class="bg-red-800 hover:bg-red-600 text-red-200 hover:text-white rounded-full p-1.5 transition-colors flex items-center justify-center border border-red-600" title="Click to Unmute Alerts">
+                    <!-- Muted Icon -->
+                    <svg id="sound-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                    <!-- Unmuted Icon -->
+                    <svg id="sound-on-icon" class="hidden" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+                <div id="network-indicator" class="h-2 w-2 rounded-full bg-green-400 opacity-50 transition-all duration-200" title="Network Activity"></div>
+            </div>
         </div>
         
         <div class="p-5 flex flex-col gap-4">
@@ -210,287 +224,38 @@
         };
 
         function translateCity(cityName) {
-            // Direct match
             if (cityTranslations[cityName]) return `${cityName} (${cityTranslations[cityName]})`;
-            
-            // Fuzzy match for sub-regions (e.g. "Ashkelon South" -> "Ashkelon")
             for (let hebrew in cityTranslations) {
                 let mainPart = hebrew.split(' - ')[0].trim();
                 if (cityName.includes(mainPart) || hebrew.includes(cityName)) {
                     return `${cityName} (${cityTranslations[hebrew]})`;
                 }
             }
-            
-            // Fallback to original Hebrew if no translation matches
             return cityName;
         }
 
-        // --- 3. AUDIO ENGINE ---
+        // --- 3. BROWSER-SAFE AUDIO ENGINE ---
         let audioCtx;
-        let audioContextEnabled = false;
+        let isSoundEnabled = false;
 
-        function initAudio() {
-            if (!audioContextEnabled) {
+        function toggleSound() {
+            // Create context if it doesn't exist yet
+            if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                audioContextEnabled = true;
-            }
-        }
-        document.addEventListener('click', initAudio, { once: true });
-
-        function playBeep() {
-            if (!audioContextEnabled || !audioCtx) return;
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(850, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.35);
-            
-            gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
-            
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.35);
-        }
-
-        // --- 4. ALERT LOGIC & UI UPDATES ---
-        const activeMarkers = new Map();
-        const recentAlerts = new Set(); 
-
-        function flashNetworkIndicator() {
-            const indicator = document.getElementById('network-indicator');
-            indicator.classList.remove('net-activity');
-            void indicator.offsetWidth; 
-            indicator.classList.add('net-activity');
-        }
-
-        function getCoords(cityName) {
-            if (cityCoordinates[cityName]) return cityCoordinates[cityName];
-            for (let knownCity in cityCoordinates) {
-                let mainPart = knownCity.split(' - ')[0].trim();
-                if (cityName.includes(mainPart) || knownCity.includes(cityName)) {
-                    return cityCoordinates[knownCity];
-                }
-            }
-            return [31.5 + (Math.random() * 1.5 - 0.75), 34.8 + (Math.random() * 0.5 - 0.25)];
-        }
-
-        function updateAlertUI(cityName, alertId) {
-            const list = document.getElementById('alerts-list');
-            const noAlerts = document.getElementById('no-alerts-msg');
-            if (noAlerts) noAlerts.style.display = 'none';
-
-            const li = document.createElement('li');
-            li.id = 'alert-item-' + alertId;
-            // Start as an active red alert
-            li.className = 'bg-red-900 bg-opacity-40 border border-red-500 rounded-md p-3 text-sm text-white flex justify-between items-center animate-flash shadow-md transition-colors duration-1000';
-            
-            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-            const translatedName = translateCity(cityName);
-
-            li.innerHTML = `<span class="font-bold tracking-wide" dir="auto">${translatedName}</span><span class="text-xs text-red-300 font-mono time-stamp whitespace-nowrap ml-2">${time}</span>`;
-            list.insertBefore(li, list.firstChild);
-
-            // Keep history capped at 50 items so the browser doesn't lag over time
-            if (list.children.length > 50) {
-                list.removeChild(list.lastChild);
-            }
-        }
-
-        function expireAlertUI(alertId) {
-            const existing = document.getElementById('alert-item-' + alertId);
-            if (existing) {
-                // Dim the alert to look like history instead of removing it
-                existing.className = 'bg-gray-800 bg-opacity-40 border border-gray-700 rounded-md p-3 text-sm text-gray-400 flex justify-between items-center transition-colors duration-1000';
-                const timeStamp = existing.querySelector('.time-stamp');
-                if (timeStamp) timeStamp.className = 'text-xs text-gray-500 font-mono whitespace-nowrap ml-2';
-            }
-        }
-
-        function triggerAlert(cityName) {
-            const alertId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
-
-            if (activeMarkers.has(cityName)) {
-                clearTimeout(activeMarkers.get(cityName).timeout);
-                activeMarkers.get(cityName).marker.remove();
-                activeMarkers.delete(cityName);
             }
             
-            const coords = getCoords(cityName);
-            const icon = L.divIcon({
-                className: 'radar-blip-container',
-                html: `<div class="radar-pulse-1"></div><div class="radar-pulse-2"></div><div class="radar-blip"></div>`,
-                iconSize: [24, 24]
-            });
-
-            const marker = L.marker(coords, { icon }).addTo(map);
-            map.flyTo(coords, Math.max(map.getZoom(), 10), { duration: 1.5 });
-
-            updateAlertUI(cityName, alertId);
-            playBeep();
-
-            const timeout = setTimeout(() => {
-                marker.remove();
-                activeMarkers.delete(cityName);
-                expireAlertUI(alertId); // Dim it instead of deleting it
-            }, 45000);
-
-            activeMarkers.set(cityName, { marker, timeout });
-        }
-
-        function simulateAlert() {
-            initAudio(); 
-            const cities = Object.keys(cityCoordinates);
-            const randomCity = cities[Math.floor(Math.random() * cities.length)];
-            processIncomingData([randomCity]);
-        }
-
-        // Central payload processor handling multiple API formats
-        function processIncomingData(payload) {
-            if (!payload) return;
-            flashNetworkIndicator();
-            
-            let cities = [];
-            
-            // Extract from various array/object structures
-            if (Array.isArray(payload)) {
-                payload.forEach(item => {
-                    if (typeof item === 'string') cities.push(item);
-                    else if (item.cities) cities.push(...item.cities);
-                    else if (item.data) cities.push(...item.data);
+            if (!isSoundEnabled) {
+                // Resume the context (must happen during user click)
+                audioCtx.resume().then(() => {
+                    isSoundEnabled = true;
+                    document.getElementById('sound-off-icon').classList.add('hidden');
+                    document.getElementById('sound-on-icon').classList.remove('hidden');
+                    document.getElementById('sound-toggle').classList.replace('bg-red-800', 'bg-green-700');
+                    document.getElementById('sound-toggle').classList.replace('border-red-600', 'border-green-500');
+                    playBeep(); // Play a test beep so the user knows it works
                 });
-            } else if (payload.cities) {
-                cities.push(...payload.cities);
-            } else if (payload.data && Array.isArray(payload.data)) {
-                cities.push(...payload.data);
-            }
-            
-            cities.forEach(city => {
-                if (city && !recentAlerts.has(city)) {
-                    recentAlerts.add(city);
-                    triggerAlert(city);
-                    setTimeout(() => recentAlerts.delete(city), 60000); 
-                }
-            });
-        }
-
-        // --- 5. DUAL ENGINE NETWORKING ---
-        let lastErrorDetails = "No errors recorded yet.";
-
-        function showDebug() {
-            document.getElementById('debug-content').textContent = lastErrorDetails;
-            document.getElementById('debug-modal').classList.remove('hidden');
-        }
-
-        function closeDebug() {
-            document.getElementById('debug-modal').classList.add('hidden');
-        }
-
-        // Engine 1: Background WebSocket (Socket.io Protocol)
-        let ws;
-        function connectWS() {
-            const statusEl = document.getElementById('ws-status');
-            try {
-                // Use strict Socket.io v4 websocket transport path
-                ws = new WebSocket('wss://api.tzevaadom.co.il/socket.io/?EIO=4&transport=websocket');
-                
-                ws.onopen = () => {
-                    statusEl.textContent = 'Connected';
-                    statusEl.className = 'text-green-400 font-mono text-xs';
-                    // Socket.io requires a '2' (ping) message to keep the connection alive
-                    ws.pingInterval = setInterval(() => {
-                        if(ws.readyState === WebSocket.OPEN) ws.send('2');
-                    }, 25000);
-                };
-                
-                ws.onmessage = (event) => {
-                    // Socket.io messages start with numbers, e.g., '42["notification", {...}]'
-                    if (typeof event.data === 'string' && event.data.startsWith('42')) {
-                        try {
-                            const payload = JSON.parse(event.data.substring(2));
-                            // payload[1] contains the actual alert data object
-                            if (payload && payload[1]) {
-                                processIncomingData(payload[1]);
-                            }
-                        } catch(e) { /* ignore parse errors */ }
-                    }
-                };
-                
-                ws.onclose = () => {
-                    clearInterval(ws.pingInterval);
-                    statusEl.textContent = 'Standby (Using API)';
-                    statusEl.className = 'text-gray-400 font-mono text-xs';
-                    // Try to reconnect gracefully without spamming
-                    setTimeout(connectWS, 10000);
-                };
-                
-                ws.onerror = () => ws.close();
-            } catch(err) {
-                statusEl.textContent = 'Standby (Using API)';
-                statusEl.className = 'text-gray-400 font-mono text-xs';
-            }
-        }
-
-        // Engine 2: Vercel Backend Polling
-        let isPolling = false;
-        async function pollAPI() {
-            if (isPolling) return;
-            isPolling = true;
-
-            const statusEl = document.getElementById('api-status');
-            const cacheBuster = new Date().getTime(); 
-            const url = `/api/proxy?t=${cacheBuster}`;
-
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 4500);
-
-                const response = await fetch(url, { 
-                    method: 'GET',
-                    cache: 'no-store',
-                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    const textData = await response.text();
-                    if (textData && textData.trim().length > 0) {
-                        processIncomingData(JSON.parse(textData)); 
-                    }
-                    statusEl.innerHTML = `OK (Live)`;
-                    statusEl.className = 'text-green-400 font-mono text-xs';
-                } else {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-            } catch (err) {
-                let errMessage = err.name === 'AbortError' ? 'Timeout' : err.message;
-                
-                // If the browser strictly blocked it due to an adblocker
-                if (errMessage === 'Failed to fetch') {
-                    errMessage = 'Browser/Adblocker blocked request';
-                }
-
-                lastErrorDetails = `[Vercel API Failed]\nReason: ${errMessage}\n\nNote: As long as the WebSocket says "Connected", you will still receive alerts in real-time.`;
-                statusEl.innerHTML = `Error <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
-                statusEl.className = 'text-red-400 font-mono text-xs';
-            }
-
-            isPolling = false;
-        }
-
-        // Start both engines
-        connectWS();
-        setInterval(pollAPI, 3000);
-        pollAPI();
-
-    </script>
-</body>
-</html>
+            } else {
+                // Mute
+                isSoundEnabled = false;
+                document.getElementById('sound-on-icon').classList.add('hidden');
+                document.getElementById('sound-off-icon').
