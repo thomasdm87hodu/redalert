@@ -171,7 +171,7 @@
             maxZoom: 19
         }).addTo(map);
 
-        // --- 2. COORDINATES DICTIONARY ---
+        // --- 2. COORDINATES & TRANSLATION DICTIONARY ---
         const cityCoordinates = {
             "תל אביב - יפו": [32.0853, 34.7818], "חיפה": [32.7940, 34.9896], "ירושלים": [31.7683, 35.2137],
             "שדרות": [31.5235, 34.5947], "אשקלון": [31.6693, 34.5715], "אשדוד": [31.8044, 34.6553],
@@ -182,6 +182,48 @@
             "ראשון לציון": [31.9730, 34.7925], "רחובות": [31.8928, 34.8113], "מודיעין": [31.8903, 35.0064],
             "בית שמש": [31.7455, 34.9867], "אילת": [29.5581, 34.9482]
         };
+
+        const cityTranslations = {
+            "תל אביב - יפו": "Tel Aviv",
+            "חיפה": "Haifa",
+            "ירושלים": "Jerusalem",
+            "שדרות": "Sderot",
+            "אשקלון": "Ashkelon",
+            "אשדוד": "Ashdod",
+            "באר שבע": "Beersheba",
+            "נתיבות": "Netivot",
+            "אופקים": "Ofakim",
+            "קרית שמונה": "Kiryat Shmona",
+            "מטולה": "Metula",
+            "נהריה": "Nahariya",
+            "צפת": "Safed",
+            "טבריה": "Tiberias",
+            "עפולה": "Afula",
+            "חדרה": "Hadera",
+            "נתניה": "Netanya",
+            "הרצליה": "Herzliya",
+            "ראשון לציון": "Rishon LeZion",
+            "רחובות": "Rehovot",
+            "מודיעין": "Modi'in",
+            "בית שמש": "Beit Shemesh",
+            "אילת": "Eilat"
+        };
+
+        function translateCity(cityName) {
+            // Direct match
+            if (cityTranslations[cityName]) return cityTranslations[cityName];
+            
+            // Fuzzy match for sub-regions (e.g. "Ashkelon South" -> "Ashkelon")
+            for (let hebrew in cityTranslations) {
+                let mainPart = hebrew.split(' - ')[0].trim();
+                if (cityName.includes(mainPart) || hebrew.includes(cityName)) {
+                    return cityTranslations[hebrew];
+                }
+            }
+            
+            // Fallback to original Hebrew if no translation matches
+            return cityName;
+        }
 
         // --- 3. AUDIO ENGINE ---
         let audioCtx;
@@ -250,7 +292,9 @@
             li.className = 'bg-red-900 bg-opacity-40 border border-red-500 rounded-md p-3 text-sm text-white flex justify-between items-center animate-flash shadow-md transition-colors duration-1000';
             
             const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-            li.innerHTML = `<span class="font-bold tracking-wide">${cityName}</span><span class="text-xs text-red-300 font-mono time-stamp">${time}</span>`;
+            const translatedName = translateCity(cityName);
+
+            li.innerHTML = `<span class="font-bold tracking-wide">${translatedName}</span><span class="text-xs text-red-300 font-mono time-stamp">${time}</span>`;
             list.insertBefore(li, list.firstChild);
 
             // Keep history capped at 50 items so the browser doesn't lag over time
