@@ -313,7 +313,7 @@
             });
         }
 
-        // --- 5. WATERFALL POLLING ENGINE ---
+        // --- 5. WATERFALL POLLING ENGINE (With Cache-Busting) ---
         let lastErrorDetails = "No errors recorded yet.";
         let currentEndpointIndex = 0;
 
@@ -326,23 +326,25 @@
             document.getElementById('debug-modal').classList.add('hidden');
         }
 
-        // We cycle through multiple proxies to ensure maximum uptime and bypass geo-blocks
-        const targetOrefUrl = encodeURIComponent('https://www.oref.org.il/WarningMessages/alert/alerts.json');
-        const fetchEndpoints = [
-            '/api/proxy', // Primary: Your custom Vercel backend
-            `https://api.allorigins.win/raw?url=${targetOrefUrl}`, // Fallback 1
-            `https://api.codetabs.com/v1/proxy?quest=${targetOrefUrl}` // Fallback 2
-        ];
-
         async function pollOrefAPI() {
             const statusEl = document.getElementById('oref-status');
             let success = false;
             let responseText = "";
+            let parsedData = null;
             let errors = [];
 
-            // Try the current preferred endpoint
+            // CRITICAL FIX: Append a unique timestamp to EVERY request to instantly bust proxy caches
+            const cacheBuster = new Date().getTime();
+            const targetOrefUrl = encodeURIComponent(`https://www.oref.org.il/WarningMessages/alert/alerts.json?v=${cacheBuster}`);
+            
+            const fetchEndpoints = [
+                `/api/proxy?t=${cacheBuster}`, // Primary: Your custom Vercel backend
+                `https://api.allorigins.win/raw?url=${targetOrefUrl}&disableCache=true`, // Fallback 1
+                `https://api.codetabs.com/v1/proxy?quest=${targetOrefUrl}` // Fallback 2
+            ];
+
+            // Try the endpoints sequentially
             for (let i = 0; i < fetchEndpoints.length; i++) {
-                // Determine which endpoint to try (start with the one that worked last time)
                 let attemptIndex = (currentEndpointIndex + i) % fetchEndpoints.length;
                 let currentUrl = fetchEndpoints[attemptIndex];
 
@@ -354,9 +356,21 @@
 
                     if (response.ok) {
                         responseText = await response.text();
+                        
+                        // CRITICAL FIX: Detect Oref/Imperva HTML Block Pages. 
+                        // If the response starts with HTML instead of JSON/Empty, Oref has blocked the proxy.
+                        if (responseText.trim().toLowerCase().startsWith('<')) {
+                            throw new Error('Blocked by Oref Firewall (HTML Response)');
+                        }
+
+                        // Strictly validate JSON if the response is not empty
+                        if (responseText && responseText.trim().length > 0) {
+                            parsedData = JSON.parse(responseText); // Will throw error if invalid
+                        }
+
                         success = true;
-                        currentEndpointIndex = attemptIndex; // Save the successful endpoint for the next run
-                        break; // Stop trying proxies
+                        currentEndpointIndex = attemptIndex; // Save working endpoint
+                        break; 
                     } else {
                         errors.push(`[${currentUrl}]: HTTP ${response.status}`);
                     }
@@ -366,23 +380,17 @@
             }
 
             if (success) {
-                // Parse the successful response
-                if (responseText && responseText.trim().length > 0) {
-                    try {
-                        const data = JSON.parse(responseText);
-                        if (data && data.data && Array.isArray(data.data)) {
-                            processIncomingData(data.data);
-                        }
-                    } catch(e) {
-                        // Ignored formatting issues
-                    }
+                // If we successfully retrieved and parsed data, trigger the map alerts
+                if (parsedData && parsedData.data && Array.isArray(parsedData.data)) {
+                    processIncomingData(parsedData.data);
                 }
+                
                 statusEl.innerHTML = `OK (Live) <span class="text-gray-500 text-[10px] ml-1">E${currentEndpointIndex+1}</span>`;
                 statusEl.className = 'text-green-400 font-mono text-xs';
             } else {
-                // If ALL endpoints failed, display the error state
+                // Display error state if all bypass attempts failed
                 const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-                lastErrorDetails = `[${time}] System Failure:\nAll connection proxies failed.\n\nDetails:\n${errors.join('\n')}\n\nOref blocks IP ranges dynamically. The system will continue trying to rotate through available gateways.`;
+                lastErrorDetails = `[${time}] System Failure:\nAll connection proxies failed or were blocked by Imperva.\n\nDetails:\n${errors.join('\n')}\n\nOref blocks IP ranges dynamically. The system will continue trying to rotate through available gateways.`;
                 
                 statusEl.innerHTML = `Error (Retrying) <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
                 statusEl.className = 'text-red-400 font-mono text-xs';
