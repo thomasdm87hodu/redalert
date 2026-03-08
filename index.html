@@ -326,6 +326,12 @@
         function closeDebug() {
             document.getElementById('debug-modal').classList.add('hidden');
         }
+        
+        // Helper to safely extract proxy names without crashing on relative URLs
+        function getProxyName(url) {
+            if (url.startsWith('/')) return 'Vercel API';
+            try { return new URL(url).hostname; } catch(e) { return 'Unknown Proxy'; }
+        }
 
         async function pollOrefAPI() {
             // Prevent overlapping queries if a request is taking a long time
@@ -351,11 +357,12 @@
             for (let i = 0; i < fetchEndpoints.length; i++) {
                 let attemptIndex = (currentEndpointIndex + i) % fetchEndpoints.length;
                 let currentUrl = fetchEndpoints[attemptIndex];
+                let proxyName = getProxyName(currentUrl);
 
                 try {
-                    // Force a 2-second timeout per proxy to completely prevent hanging
+                    // INCREASED TIMEOUT: 4 seconds allows Vercel cold-starts and proxies to respond
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+                    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
                     const response = await fetch(currentUrl, { 
                         method: 'GET',
@@ -384,11 +391,11 @@
                         currentEndpointIndex = attemptIndex; 
                         break; 
                     } else {
-                        errors.push(`[${new URL(currentUrl).hostname}]: HTTP ${response.status}`);
+                        errors.push(`[${proxyName}]: HTTP ${response.status}`);
                     }
                 } catch (err) {
                     let errMessage = err.name === 'AbortError' ? 'Connection Timed Out (Hanging)' : err.message;
-                    try { errors.push(`[${new URL(currentUrl).hostname}]: ${errMessage}`); } catch(e) { errors.push(`[Proxy]: ${errMessage}`); }
+                    errors.push(`[${proxyName}]: ${errMessage}`);
                 }
             }
 
@@ -410,8 +417,8 @@
             isPolling = false;
         }
 
-        // Run Polling Engine
-        setInterval(pollOrefAPI, 2500);
+        // Run Polling Engine (Ping every 3 seconds to account for the slightly longer timeout allowance)
+        setInterval(pollOrefAPI, 3000);
         pollOrefAPI();
 
     </script>
