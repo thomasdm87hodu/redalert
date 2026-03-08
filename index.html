@@ -116,8 +116,12 @@
             <!-- Connection Status -->
             <div class="flex flex-col gap-1 text-sm border-b border-gray-700 pb-3">
                 <div class="flex items-center justify-between">
-                    <span class="text-gray-400">Alert Network Status:</span>
-                    <span id="oref-status" class="text-yellow-400 font-mono text-xs">Connecting...</span>
+                    <span class="text-gray-400">Vercel API:</span>
+                    <span id="api-status" class="text-yellow-400 font-mono text-xs">Connecting...</span>
+                </div>
+                <div class="flex items-center justify-between mt-1">
+                    <span class="text-gray-400">WebSocket:</span>
+                    <span id="ws-status" class="text-yellow-400 font-mono text-xs">Connecting...</span>
                 </div>
             </div>
             
@@ -299,24 +303,37 @@
             processIncomingData([randomCity]);
         }
 
-        function processIncomingData(citiesArray) {
-            if (!citiesArray || !Array.isArray(citiesArray) || citiesArray.length === 0) return;
+        // Central payload processor handling multiple API formats
+        function processIncomingData(payload) {
+            if (!payload) return;
             flashNetworkIndicator();
             
-            citiesArray.forEach(city => {
-                let cityName = typeof city === 'string' ? city : (city.name || city.zone || "");
-                if (cityName && !recentAlerts.has(cityName)) {
-                    recentAlerts.add(cityName);
-                    triggerAlert(cityName);
-                    setTimeout(() => recentAlerts.delete(cityName), 60000); 
+            let cities = [];
+            
+            // Extract from various array/object structures
+            if (Array.isArray(payload)) {
+                payload.forEach(item => {
+                    if (typeof item === 'string') cities.push(item);
+                    else if (item.cities) cities.push(...item.cities);
+                    else if (item.data) cities.push(...item.data);
+                });
+            } else if (payload.cities) {
+                cities.push(...payload.cities);
+            } else if (payload.data && Array.isArray(payload.data)) {
+                cities.push(...payload.data);
+            }
+            
+            cities.forEach(city => {
+                if (city && !recentAlerts.has(city)) {
+                    recentAlerts.add(city);
+                    triggerAlert(city);
+                    setTimeout(() => recentAlerts.delete(city), 60000); 
                 }
             });
         }
 
-        // --- 5. WATERFALL POLLING ENGINE (WAF Bypass & Tzofar Redundancy) ---
+        // --- 5. DUAL ENGINE NETWORKING ---
         let lastErrorDetails = "No errors recorded yet.";
-        let currentEndpointIndex = 0;
-        let isPolling = false; // Concurrency lock to prevent overlapping fetch jams
 
         function showDebug() {
             document.getElementById('debug-content').textContent = lastErrorDetails;
@@ -327,118 +344,95 @@
             document.getElementById('debug-modal').classList.add('hidden');
         }
 
-        async function pollOrefAPI() {
+        // Engine 1: Background WebSocket (Bypasses CORS & Firewalls)
+        let ws;
+        function connectWS() {
+            const statusEl = document.getElementById('ws-status');
+            try {
+                ws = new WebSocket('wss://ws.tzevaadom.co.il/socket?type=web');
+                
+                ws.onopen = () => {
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'text-green-400 font-mono text-xs';
+                    ws.pingInterval = setInterval(() => {
+                        if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
+                    }, 25000);
+                };
+                
+                ws.onmessage = (event) => {
+                    if (event.data === "pong" || event.data.includes("ping")) return;
+                    try {
+                        processIncomingData(JSON.parse(event.data));
+                    } catch(e) { /* ignore parse errors */ }
+                };
+                
+                ws.onclose = () => {
+                    clearInterval(ws.pingInterval);
+                    statusEl.textContent = 'Disconnected (Retrying)';
+                    statusEl.className = 'text-red-400 font-mono text-xs';
+                    setTimeout(connectWS, 5000);
+                };
+                
+                ws.onerror = () => ws.close();
+            } catch(err) {
+                statusEl.textContent = 'Error';
+                statusEl.className = 'text-red-400 font-mono text-xs';
+            }
+        }
+
+        // Engine 2: Vercel Backend Polling
+        let isPolling = false;
+        async function pollAPI() {
             if (isPolling) return;
             isPolling = true;
 
-            const statusEl = document.getElementById('oref-status');
-            let success = false;
-            let responseText = "";
-            let parsedData = null;
-            let errors = [];
-
-            const targetOrefUrl = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
-            const encodedOrefUrl = encodeURIComponent(targetOrefUrl);
+            const statusEl = document.getElementById('api-status');
             const cacheBuster = new Date().getTime(); 
-            
-            // The ultimate 4-layer redundancy array
-            const fetchEndpoints = [
-                { url: `/api/proxy?t=${cacheBuster}`, type: 'raw', name: 'Vercel API' },
-                { url: `https://api.allorigins.win/get?url=${encodedOrefUrl}&disableCache=true`, type: 'allorigins_wrapper', name: 'AllOrigins Proxy' },
-                { url: `https://api.tzevaadom.co.il/notifications?t=${cacheBuster}`, type: 'tzofar', name: 'Tzofar Redundancy' },
-                { url: `https://api.codetabs.com/v1/proxy?quest=${encodedOrefUrl}`, type: 'raw', name: 'CodeTabs Proxy' }
-            ];
+            const url = `/api/proxy?t=${cacheBuster}`;
 
-            for (let i = 0; i < fetchEndpoints.length; i++) {
-                let attemptIndex = (currentEndpointIndex + i) % fetchEndpoints.length;
-                let current = fetchEndpoints[attemptIndex];
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-                try {
-                    // Increased to 4.5 seconds for maximum cold-start leniency
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 4500);
+                const response = await fetch(url, { 
+                    method: 'GET',
+                    cache: 'no-store',
+                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+                    signal: controller.signal
+                });
 
-                    const response = await fetch(current.url, { 
-                        method: 'GET',
-                        cache: 'no-store',
-                        headers: {
-                            'Cache-Control': 'no-cache',
-                            'Pragma': 'no-cache'
-                        },
-                        signal: controller.signal
-                    });
+                clearTimeout(timeoutId);
 
-                    clearTimeout(timeoutId);
-
-                    if (response.ok) {
-                        let rawText = await response.text();
-                        
-                        // FIX 1: Safely unpack the AllOrigins JSON wrapper to bypass CORS crashes
-                        if (current.type === 'allorigins_wrapper') {
-                            const wrapper = JSON.parse(rawText);
-                            if (wrapper.status && wrapper.status.http_code !== 200 && wrapper.status.http_code !== 304) {
-                                throw new Error(`Target returned HTTP ${wrapper.status.http_code}`);
-                            }
-                            rawText = wrapper.contents || "";
-                        }
-
-                        // Catch strict HTML firewall blocks
-                        if (rawText.trim().toLowerCase().startsWith('<')) {
-                            throw new Error('Blocked by Firewall (HTML Response)');
-                        }
-
-                        // Process actual data if not empty
-                        if (rawText && rawText.trim().length > 0) {
-                            const jsonData = JSON.parse(rawText); 
-                            
-                            // FIX 2: Handle Tzofar's different JSON structure
-                            if (current.type === 'tzofar') {
-                                let tzCities = [];
-                                if (Array.isArray(jsonData)) {
-                                    jsonData.forEach(item => {
-                                        if (item.cities) tzCities.push(...item.cities);
-                                        else if (item.data) tzCities.push(...item.data);
-                                    });
-                                }
-                                parsedData = { data: tzCities };
-                            } else {
-                                // Standard Oref formatting
-                                parsedData = jsonData;
-                            }
-                        }
-
-                        success = true;
-                        currentEndpointIndex = attemptIndex; 
-                        break; 
-                    } else {
-                        errors.push(`[${current.name}]: HTTP ${response.status}`);
+                if (response.ok) {
+                    const textData = await response.text();
+                    if (textData && textData.trim().length > 0) {
+                        processIncomingData(JSON.parse(textData)); 
                     }
-                } catch (err) {
-                    let errMessage = err.name === 'AbortError' ? 'Timeout (Hanging)' : err.message;
-                    errors.push(`[${current.name}]: ${errMessage}`);
+                    statusEl.innerHTML = `OK (Live)`;
+                    statusEl.className = 'text-green-400 font-mono text-xs';
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
                 }
-            }
-
-            if (success) {
-                if (parsedData && parsedData.data && Array.isArray(parsedData.data)) {
-                    processIncomingData(parsedData.data);
-                }
-                statusEl.innerHTML = `OK (Live) <span class="text-gray-500 text-[10px] ml-1">E${currentEndpointIndex+1}</span>`;
-                statusEl.className = 'text-green-400 font-mono text-xs';
-            } else {
-                const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-                lastErrorDetails = `[${time}] System Failure:\nAll connection gateways failed or timed out.\n\nDetails:\n${errors.join('\n')}\n\nThe system will continue trying to rotate through available gateways.`;
+            } catch (err) {
+                let errMessage = err.name === 'AbortError' ? 'Timeout' : err.message;
                 
-                statusEl.innerHTML = `Error (Retrying) <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
+                // If the browser strictly blocked it due to an adblocker
+                if (errMessage === 'Failed to fetch') {
+                    errMessage = 'Browser/Adblocker blocked request';
+                }
+
+                lastErrorDetails = `[Vercel API Failed]\nReason: ${errMessage}\n\nNote: As long as the WebSocket says "Connected", you will still receive alerts in real-time.`;
+                statusEl.innerHTML = `Error <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
                 statusEl.className = 'text-red-400 font-mono text-xs';
             }
 
             isPolling = false;
         }
 
-        // Run Polling Engine
-        setInterval(pollOrefAPI, 3000);
-        pollOrefAPI();
+        // Start both engines
+        connectWS();
+        setInterval(pollAPI, 3000);
+        pollAPI();
 
     </script>
 </body>
