@@ -127,9 +127,9 @@
             
             <!-- Alert Feed -->
             <div class="pt-1 flex-1 flex flex-col">
-                <h2 class="text-xs text-gray-400 mb-3 uppercase tracking-wider font-semibold">Real-Time Active Alerts</h2>
+                <h2 class="text-xs text-gray-400 mb-3 uppercase tracking-wider font-semibold">Alert Feed (History)</h2>
                 <ul id="alerts-list" class="space-y-2 max-h-48 overflow-y-auto">
-                    <li class="text-gray-500 text-sm italic py-2" id="no-alerts-msg">No active threats detected.</li>
+                    <li class="text-gray-500 text-sm italic py-2" id="no-alerts-msg">No threats detected yet.</li>
                 </ul>
             </div>
             
@@ -239,35 +239,39 @@
             return [31.5 + (Math.random() * 1.5 - 0.75), 34.8 + (Math.random() * 0.5 - 0.25)];
         }
 
-        function updateAlertUI(cityName) {
+        function updateAlertUI(cityName, alertId) {
             const list = document.getElementById('alerts-list');
             const noAlerts = document.getElementById('no-alerts-msg');
             if (noAlerts) noAlerts.style.display = 'none';
 
-            const existing = document.getElementById('alert-item-' + cityName);
-            if (existing) existing.remove();
-
             const li = document.createElement('li');
-            li.id = 'alert-item-' + cityName;
-            li.className = 'bg-red-900 bg-opacity-40 border border-red-500 rounded-md p-3 text-sm text-white flex justify-between items-center animate-flash shadow-md';
+            li.id = 'alert-item-' + alertId;
+            // Start as an active red alert
+            li.className = 'bg-red-900 bg-opacity-40 border border-red-500 rounded-md p-3 text-sm text-white flex justify-between items-center animate-flash shadow-md transition-colors duration-1000';
             
             const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-            li.innerHTML = `<span class="font-bold tracking-wide">${cityName}</span><span class="text-xs text-red-300 font-mono">${time}</span>`;
+            li.innerHTML = `<span class="font-bold tracking-wide">${cityName}</span><span class="text-xs text-red-300 font-mono time-stamp">${time}</span>`;
             list.insertBefore(li, list.firstChild);
+
+            // Keep history capped at 50 items so the browser doesn't lag over time
+            if (list.children.length > 50) {
+                list.removeChild(list.lastChild);
+            }
         }
 
-        function removeAlertUI(cityName) {
-            const existing = document.getElementById('alert-item-' + cityName);
-            if (existing) existing.remove();
-            
-            const list = document.getElementById('alerts-list');
-            if (list.children.length === 0 || (list.children.length === 1 && list.children[0].id === 'no-alerts-msg')) {
-                const noAlerts = document.getElementById('no-alerts-msg');
-                if (noAlerts) noAlerts.style.display = 'block';
+        function expireAlertUI(alertId) {
+            const existing = document.getElementById('alert-item-' + alertId);
+            if (existing) {
+                // Dim the alert to look like history instead of removing it
+                existing.className = 'bg-gray-800 bg-opacity-40 border border-gray-700 rounded-md p-3 text-sm text-gray-400 flex justify-between items-center transition-colors duration-1000';
+                const timeStamp = existing.querySelector('.time-stamp');
+                if (timeStamp) timeStamp.className = 'text-xs text-gray-500 font-mono';
             }
         }
 
         function triggerAlert(cityName) {
+            const alertId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
+
             if (activeMarkers.has(cityName)) {
                 clearTimeout(activeMarkers.get(cityName).timeout);
                 activeMarkers.get(cityName).marker.remove();
@@ -284,13 +288,13 @@
             const marker = L.marker(coords, { icon }).addTo(map);
             map.flyTo(coords, Math.max(map.getZoom(), 10), { duration: 1.5 });
 
-            updateAlertUI(cityName);
+            updateAlertUI(cityName, alertId);
             playBeep();
 
             const timeout = setTimeout(() => {
                 marker.remove();
                 activeMarkers.delete(cityName);
-                removeAlertUI(cityName);
+                expireAlertUI(alertId); // Dim it instead of deleting it
             }, 45000);
 
             activeMarkers.set(cityName, { marker, timeout });
