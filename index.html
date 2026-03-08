@@ -313,9 +313,10 @@
             });
         }
 
-        // --- 5. WATERFALL POLLING ENGINE (WAF Bypass) ---
+        // --- 5. WATERFALL POLLING ENGINE (WAF Bypass & Anti-Hang) ---
         let lastErrorDetails = "No errors recorded yet.";
         let currentEndpointIndex = 0;
+        let isPolling = false; // Concurrency lock to prevent overlapping fetch jams
 
         function showDebug() {
             document.getElementById('debug-content').textContent = lastErrorDetails;
@@ -327,27 +328,24 @@
         }
 
         async function pollOrefAPI() {
+            // Prevent overlapping queries if a request is taking a long time
+            if (isPolling) return;
+            isPolling = true;
+
             const statusEl = document.getElementById('oref-status');
             let success = false;
             let responseText = "";
             let parsedData = null;
             let errors = [];
 
-            // CRITICAL FIX: Do NOT tamper with the Oref URL. Keep it exactly as Oref expects it.
-            // Imperva WAF automatically blocks requests if it sees random `?v=` variables.
             const targetOrefUrl = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
             const encodedOrefUrl = encodeURIComponent(targetOrefUrl);
-            const cacheBuster = new Date().getTime(); // Used ONLY for the proxy URLs
+            const cacheBuster = new Date().getTime(); 
             
             const fetchEndpoints = [
-                // 1. AllOrigins: We use their native `disableCache` parameter which doesn't alter the target URL
-                `https://api.allorigins.win/raw?url=${encodedOrefUrl}&disableCache=true`, 
-                // 2. CORSProxy.io: Often very stealthy against WAFs
-                `https://corsproxy.io/?${encodedOrefUrl}`,
-                // 3. Custom Vercel Backend: Cache busting attached to OUR api route, not Oref's
-                `/api/proxy?t=${cacheBuster}`, 
-                // 4. CodeTabs
-                `https://api.codetabs.com/v1/proxy?quest=${encodedOrefUrl}` 
+                `/api/proxy?t=${cacheBuster}`, // 1. Custom Vercel Backend
+                `https://api.allorigins.win/raw?url=${encodedOrefUrl}&disableCache=true`, // 2. AllOrigins
+                `https://api.codetabs.com/v1/proxy?quest=${encodedOrefUrl}` // 3. CodeTabs
             ];
 
             for (let i = 0; i < fetchEndpoints.length; i++) {
@@ -355,20 +353,25 @@
                 let currentUrl = fetchEndpoints[attemptIndex];
 
                 try {
-                    // Provide strict HTTP headers to bypass caches without triggering WAFs
+                    // Force a 2-second timeout per proxy to completely prevent hanging
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
                     const response = await fetch(currentUrl, { 
                         method: 'GET',
                         cache: 'no-store',
                         headers: {
                             'Cache-Control': 'no-cache',
                             'Pragma': 'no-cache'
-                        }
+                        },
+                        signal: controller.signal // Bind the timeout
                     });
+
+                    clearTimeout(timeoutId);
 
                     if (response.ok) {
                         responseText = await response.text();
                         
-                        // Detect Imperva HTML WAF Block Pages. 
                         if (responseText.trim().toLowerCase().startsWith('<')) {
                             throw new Error('Blocked by Oref Firewall (HTML Response)');
                         }
@@ -378,31 +381,33 @@
                         }
 
                         success = true;
-                        currentEndpointIndex = attemptIndex; // Cache successful endpoint
+                        currentEndpointIndex = attemptIndex; 
                         break; 
                     } else {
                         errors.push(`[${new URL(currentUrl).hostname}]: HTTP ${response.status}`);
                     }
                 } catch (err) {
-                    errors.push(`[${new URL(currentUrl).hostname}]: ${err.message}`);
+                    let errMessage = err.name === 'AbortError' ? 'Connection Timed Out (Hanging)' : err.message;
+                    try { errors.push(`[${new URL(currentUrl).hostname}]: ${errMessage}`); } catch(e) { errors.push(`[Proxy]: ${errMessage}`); }
                 }
             }
 
             if (success) {
-                // Trigger map alerts with fresh data
                 if (parsedData && parsedData.data && Array.isArray(parsedData.data)) {
                     processIncomingData(parsedData.data);
                 }
-                
                 statusEl.innerHTML = `OK (Live) <span class="text-gray-500 text-[10px] ml-1">E${currentEndpointIndex+1}</span>`;
                 statusEl.className = 'text-green-400 font-mono text-xs';
             } else {
                 const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-                lastErrorDetails = `[${time}] System Failure:\nAll connection proxies failed or were blocked by Imperva.\n\nDetails:\n${errors.join('\n')}\n\nOref blocks IP ranges dynamically. The system will continue trying to rotate through available gateways.`;
+                lastErrorDetails = `[${time}] System Failure:\nAll connection proxies failed or timed out.\n\nDetails:\n${errors.join('\n')}\n\nThe system will continue trying to rotate through available gateways.`;
                 
                 statusEl.innerHTML = `Error (Retrying) <button onclick="showDebug()" class="text-blue-400 underline hover:text-blue-300 ml-1 cursor-pointer">Debug</button>`;
                 statusEl.className = 'text-red-400 font-mono text-xs';
             }
+
+            // Release the lock so the next interval can run
+            isPolling = false;
         }
 
         // Run Polling Engine
