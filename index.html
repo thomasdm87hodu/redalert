@@ -99,17 +99,31 @@
     <div id="map" class="absolute inset-0 z-0"></div>
 
     <!-- UI Overlay Panel -->
-    <div class="absolute top-4 left-4 z-10 w-80 sm:w-96 bg-gray-900 bg-opacity-90 rounded-xl shadow-2xl border border-gray-700 backdrop-blur-md flex flex-col overflow-hidden">
-        <!-- Header -->
-        <div class="bg-red-700 p-4 flex items-center justify-between shadow-md">
-            <h1 class="text-white font-bold text-lg flex items-center gap-3">
+    <div id="ui-panel" class="absolute top-4 left-4 z-10 w-80 sm:w-96 bg-gray-900 bg-opacity-90 rounded-xl shadow-2xl border border-gray-700 backdrop-blur-md flex flex-col overflow-hidden">
+        <!-- Header (Drag Handle) -->
+        <div id="ui-panel-header" class="bg-red-700 p-4 flex items-center justify-between shadow-md cursor-move">
+            <h1 class="text-white font-bold text-lg flex items-center gap-3 select-none">
                 <span class="relative flex h-3 w-3">
                   <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-200 opacity-75"></span>
                   <span class="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
                 </span>
                 Live Alert Radar
             </h1>
-            <div id="network-indicator" class="h-2 w-2 rounded-full bg-green-400 opacity-50 transition-all duration-200" title="Network Activity"></div>
+            
+            <div class="flex items-center gap-3">
+                <!-- Sound Toggle Button -->
+                <button id="sound-toggle" onclick="toggleSound()" class="bg-red-800 hover:bg-red-600 text-red-200 hover:text-white rounded-full p-1.5 transition-colors flex items-center justify-center border border-red-600 cursor-pointer" title="Click to Unmute Alerts">
+                    <!-- Muted Icon -->
+                    <svg id="sound-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                    <!-- Unmuted Icon -->
+                    <svg id="sound-on-icon" class="hidden" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+                <div id="network-indicator" class="h-2 w-2 rounded-full bg-green-400 opacity-50 transition-all duration-200" title="Network Activity"></div>
+            </div>
         </div>
         
         <div class="p-5 flex flex-col gap-4">
@@ -138,7 +152,7 @@
                 <div class="flex justify-end mb-2">
                     <button onclick="document.getElementById('demo-controls-container').style.display='none'" class="text-[10px] text-gray-500 hover:text-gray-300 transition-colors uppercase tracking-wider font-semibold" title="Hide this button">Hide Controls &times;</button>
                 </div>
-                <button onclick="simulateAlert()" class="w-full bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 shadow-lg">
+                <button onclick="simulateAlert()" class="w-full bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 shadow-lg cursor-pointer">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-300" viewBox="0 0 20 20" fill="currentColor">
                       <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
                     </svg>
@@ -318,21 +332,38 @@
             return cityName;
         }
 
-        // --- 3. AUDIO ENGINE ---
+        // --- 3. BROWSER-SAFE AUDIO ENGINE ---
         let audioCtx;
-        let audioContextEnabled = false;
+        let isSoundEnabled = false;
 
-        function initAudio() {
-            if (!audioContextEnabled) {
+        function toggleSound() {
+            // Create context if it doesn't exist yet
+            if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                audioContextEnabled = true;
+            }
+            
+            if (!isSoundEnabled) {
+                // Resume the context (must happen during user click)
+                audioCtx.resume().then(() => {
+                    isSoundEnabled = true;
+                    document.getElementById('sound-off-icon').classList.add('hidden');
+                    document.getElementById('sound-on-icon').classList.remove('hidden');
+                    document.getElementById('sound-toggle').classList.replace('bg-red-800', 'bg-green-700');
+                    document.getElementById('sound-toggle').classList.replace('border-red-600', 'border-green-500');
+                    playBeep(); // Play a test beep so the user knows it works
+                });
+            } else {
+                // Mute
+                isSoundEnabled = false;
+                document.getElementById('sound-on-icon').classList.add('hidden');
+                document.getElementById('sound-off-icon').classList.remove('hidden');
+                document.getElementById('sound-toggle').classList.replace('bg-green-700', 'bg-red-800');
+                document.getElementById('sound-toggle').classList.replace('border-green-500', 'border-red-600');
             }
         }
-        document.addEventListener('click', initAudio, { once: true });
 
         function playBeep() {
-            if (!audioContextEnabled || !audioCtx) return;
+            if (!isSoundEnabled || !audioCtx) return;
             if (audioCtx.state === 'suspended') audioCtx.resume();
             
             const osc = audioCtx.createOscillator();
@@ -448,7 +479,10 @@
         }
 
         function simulateAlert() {
-            initAudio(); 
+            // Create audio context on first user interaction if it hasn't been done
+            if (!audioCtx && !isSoundEnabled) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
             const cities = Object.keys(cityCoordinates);
             const randomCity = cities[Math.floor(Math.random() * cities.length)];
             processIncomingData([randomCity]);
@@ -582,6 +616,79 @@
         connectWS();
         setInterval(pollAPI, 3000);
         pollAPI();
+
+        // --- 6. DRAGGABLE UI PANEL ---
+        const uiPanel = document.getElementById('ui-panel');
+        const uiHeader = document.getElementById('ui-panel-header');
+
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+
+        uiHeader.addEventListener('mousedown', dragStart);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', dragEnd);
+
+        uiHeader.addEventListener('touchstart', dragStart, {passive: true});
+        document.addEventListener('touchmove', drag, {passive: false});
+        document.addEventListener('touchend', dragEnd);
+
+        function dragStart(e) {
+            // Ignore if clicking a button inside the header (like the sound toggle)
+            if (e.target.closest('button')) return;
+
+            isDragging = true;
+            
+            // Get initial touch/click position
+            if (e.type === 'touchstart') {
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+            } else {
+                startX = e.clientX;
+                startY = e.clientY;
+            }
+
+            // Get initial element position
+            const rect = uiPanel.getBoundingClientRect();
+            initialLeft = rect.left;
+            initialTop = rect.top;
+            
+            // Switch layout attributes to ensure clean dragging
+            uiPanel.style.bottom = 'auto';
+            uiPanel.style.right = 'auto';
+            uiPanel.style.margin = '0';
+            
+            // Apply current rect position immediately to override absolute Tailwind classes cleanly
+            uiPanel.style.left = `${initialLeft}px`;
+            uiPanel.style.top = `${initialTop}px`;
+        }
+
+        function drag(e) {
+            if (!isDragging) return;
+            e.preventDefault(); // Prevent scrolling on touch devices while dragging
+
+            let currentX, currentY;
+            
+            if (e.type === 'touchmove') {
+                currentX = e.touches[0].clientX;
+                currentY = e.touches[0].clientY;
+            } else {
+                currentX = e.clientX;
+                currentY = e.clientY;
+            }
+
+            const deltaX = currentX - startX;
+            const deltaY = currentY - startY;
+
+            let newLeft = initialLeft + deltaX;
+            let newTop = initialTop + deltaY;
+            
+            uiPanel.style.left = `${newLeft}px`;
+            uiPanel.style.top = `${newTop}px`;
+        }
+
+        function dragEnd() {
+            isDragging = false;
+        }
 
     </script>
 </body>
