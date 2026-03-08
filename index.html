@@ -8,8 +8,8 @@
     <!-- Tailwind CSS for UI styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <!-- Leaflet CSS (Cloudflare CDN) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
     
     <style>
         /* Map Container */
@@ -153,8 +153,8 @@
         </div>
     </div>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet JS (Cloudflare CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     
     <script>
         // --- 1. INITIALIZE MAP (Dark Tactical Theme) ---
@@ -169,14 +169,14 @@
 
         // --- 2. COORDINATES DICTIONARY ---
         const cityCoordinates = {
-‎            "תל אביב - יפו": [32.0853, 34.7818], "חיפה": [32.7940, 34.9896], "ירושלים": [31.7683, 35.2137],
-‎            "שדרות": [31.5235, 34.5947], "אשקלון": [31.6693, 34.5715], "אשדוד": [31.8044, 34.6553],
-‎            "באר שבע": [31.2518, 34.7913], "נתיבות": [31.4158, 34.5878], "אופקים": [31.3129, 34.6208],
-‎            "קרית שמונה": [33.2073, 35.5697], "מטולה": [33.2798, 35.5786], "נהריה": [33.0084, 35.0933],
-‎            "צפת": [32.9646, 35.4960], "טבריה": [32.7945, 35.5333], "עפולה": [32.6066, 35.2880],
-‎            "חדרה": [32.4340, 34.9197], "נתניה": [32.3215, 34.8532], "הרצליה": [32.1624, 34.8447],
-‎            "ראשון לציון": [31.9730, 34.7925], "רחובות": [31.8928, 34.8113], "מודיעין": [31.8903, 35.0064],
-‎            "בית שמש": [31.7455, 34.9867], "אילת": [29.5581, 34.9482]
+            "תל אביב - יפו": [32.0853, 34.7818], "חיפה": [32.7940, 34.9896], "ירושלים": [31.7683, 35.2137],
+            "שדרות": [31.5235, 34.5947], "אשקלון": [31.6693, 34.5715], "אשדוד": [31.8044, 34.6553],
+            "באר שבע": [31.2518, 34.7913], "נתיבות": [31.4158, 34.5878], "אופקים": [31.3129, 34.6208],
+            "קרית שמונה": [33.2073, 35.5697], "מטולה": [33.2798, 35.5786], "נהריה": [33.0084, 35.0933],
+            "צפת": [32.9646, 35.4960], "טבריה": [32.7945, 35.5333], "עפולה": [32.6066, 35.2880],
+            "חדרה": [32.4340, 34.9197], "נתניה": [32.3215, 34.8532], "הרצליה": [32.1624, 34.8447],
+            "ראשון לציון": [31.9730, 34.7925], "רחובות": [31.8928, 34.8113], "מודיעין": [31.8903, 35.0064],
+            "בית שמש": [31.7455, 34.9867], "אילת": [29.5581, 34.9482]
         };
 
         // --- 3. AUDIO ENGINE ---
@@ -215,12 +215,12 @@
 
         // --- 4. ALERT LOGIC & UI UPDATES ---
         const activeMarkers = new Map();
-        const recentAlerts = new Set(); // Prevent duplicate triggers
+        const recentAlerts = new Set(); 
 
         function flashNetworkIndicator() {
             const indicator = document.getElementById('network-indicator');
             indicator.classList.remove('net-activity');
-            void indicator.offsetWidth; // trigger reflow
+            void indicator.offsetWidth; 
             indicator.classList.add('net-activity');
         }
 
@@ -232,7 +232,6 @@
                     return cityCoordinates[knownCity];
                 }
             }
-            // Fallback: Randomize slightly around center of Israel
             return [31.5 + (Math.random() * 1.5 - 0.75), 34.8 + (Math.random() * 0.5 - 0.25)];
         }
 
@@ -288,7 +287,7 @@
                 marker.remove();
                 activeMarkers.delete(cityName);
                 removeAlertUI(cityName);
-            }, 45000); // clear after 45 seconds
+            }, 45000);
 
             activeMarkers.set(cityName, { marker, timeout });
         }
@@ -300,7 +299,6 @@
             processIncomingData([randomCity]);
         }
 
-        // Central payload processor
         function processIncomingData(citiesArray) {
             if (!citiesArray || !Array.isArray(citiesArray) || citiesArray.length === 0) return;
             flashNetworkIndicator();
@@ -310,14 +308,12 @@
                 if (cityName && !recentAlerts.has(cityName)) {
                     recentAlerts.add(cityName);
                     triggerAlert(cityName);
-                    // Prevent duplicate processing of the exact same city for 60 seconds
                     setTimeout(() => recentAlerts.delete(cityName), 60000); 
                 }
             });
         }
 
-        // --- 5. OREF OFFICIAL POLLING ENGINE ---
-
+        // --- 5. OREF OFFICIAL POLLING ENGINE (Vercel Backend) ---
         let lastErrorDetails = "No errors recorded yet.";
 
         function showDebug() {
@@ -329,11 +325,10 @@
             document.getElementById('debug-modal').classList.add('hidden');
         }
 
-        // Official Home Front Command (Oref) via Custom Vercel Proxy
         async function pollOrefAPI() {
             const statusEl = document.getElementById('oref-status');
             try {
-                // Call our own dedicated Vercel serverless backend
+                // Call our dedicated Vercel serverless backend
                 const response = await fetch('/api/proxy', { 
                     method: 'GET',
                     cache: 'no-store' 
@@ -342,7 +337,6 @@
                 if (response.ok) {
                     const textData = await response.text();
                     
-                    // Oref returns empty string when there are no alerts
                     if (textData && textData.trim().length > 0) {
                         try {
                             const data = JSON.parse(textData);
@@ -350,7 +344,7 @@
                                 processIncomingData(data.data);
                             }
                         } catch(e) {
-                            // Ignored: Data isn't JSON or is malformed html
+                            // Ignored
                         }
                     }
                     statusEl.innerHTML = 'OK (Live)';
@@ -368,9 +362,7 @@
         }
 
         // Run Polling Engine
-        setInterval(pollOrefAPI, 2500); // Check API every 2.5 seconds
-
-        // Initial Ping
+        setInterval(pollOrefAPI, 2500);
         pollOrefAPI();
 
     </script>
