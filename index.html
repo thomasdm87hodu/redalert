@@ -211,13 +211,13 @@
 
         function translateCity(cityName) {
             // Direct match
-            if (cityTranslations[cityName]) return cityTranslations[cityName];
+            if (cityTranslations[cityName]) return `${cityName} (${cityTranslations[cityName]})`;
             
             // Fuzzy match for sub-regions (e.g. "Ashkelon South" -> "Ashkelon")
             for (let hebrew in cityTranslations) {
                 let mainPart = hebrew.split(' - ')[0].trim();
                 if (cityName.includes(mainPart) || hebrew.includes(cityName)) {
-                    return cityTranslations[hebrew];
+                    return `${cityName} (${cityTranslations[hebrew]})`;
                 }
             }
             
@@ -294,7 +294,7 @@
             const time = new Date().toLocaleTimeString('en-US', { hour12: false });
             const translatedName = translateCity(cityName);
 
-            li.innerHTML = `<span class="font-bold tracking-wide">${translatedName}</span><span class="text-xs text-red-300 font-mono time-stamp">${time}</span>`;
+            li.innerHTML = `<span class="font-bold tracking-wide" dir="auto">${translatedName}</span><span class="text-xs text-red-300 font-mono time-stamp whitespace-nowrap ml-2">${time}</span>`;
             list.insertBefore(li, list.firstChild);
 
             // Keep history capped at 50 items so the browser doesn't lag over time
@@ -309,7 +309,7 @@
                 // Dim the alert to look like history instead of removing it
                 existing.className = 'bg-gray-800 bg-opacity-40 border border-gray-700 rounded-md p-3 text-sm text-gray-400 flex justify-between items-center transition-colors duration-1000';
                 const timeStamp = existing.querySelector('.time-stamp');
-                if (timeStamp) timeStamp.className = 'text-xs text-gray-500 font-mono';
+                if (timeStamp) timeStamp.className = 'text-xs text-gray-500 font-mono whitespace-nowrap ml-2';
             }
         }
 
