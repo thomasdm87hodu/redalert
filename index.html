@@ -29,6 +29,19 @@
             font-family: 'JetBrains Mono', monospace;
         }
 
+        /* Make UI panel visible only on hover over the embed (for non-touch devices) */
+        @media (hover: hover) {
+            #ui-panel {
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.3s ease-in-out;
+            }
+            body:hover #ui-panel {
+                opacity: 1;
+                pointer-events: auto;
+            }
+        }
+
         /* Radar Pulse Animations */
         .radar-blip-container {
             display: flex;
@@ -127,14 +140,14 @@
                       <path stroke-linecap="round" stroke-linejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                 </button>
-                <!-- Sound Toggle Button -->
-                <button id="sound-toggle" onclick="toggleSound()" class="bg-red-800 hover:bg-red-600 text-red-200 hover:text-white rounded-full p-1.5 transition-colors flex items-center justify-center border border-red-600 cursor-pointer" title="Click to Unmute Alerts">
+                <!-- Sound Toggle Button (Initialized to ON) -->
+                <button id="sound-toggle" onclick="toggleSound()" class="bg-green-700 hover:bg-green-600 text-green-200 hover:text-white rounded-full p-1.5 transition-colors flex items-center justify-center border border-green-500 cursor-pointer" title="Click to Mute Alerts">
                     <!-- Muted Icon -->
-                    <svg id="sound-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <svg id="sound-off-icon" class="hidden" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clip-rule="evenodd" />
                     </svg>
                     <!-- Unmuted Icon -->
-                    <svg id="sound-on-icon" class="hidden" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <svg id="sound-on-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clip-rule="evenodd" />
                     </svg>
                 </button>
@@ -377,7 +390,7 @@
 
         // --- 3. BROWSER-SAFE AUDIO ENGINE ---
         let audioCtx;
-        let isSoundEnabled = false;
+        let isSoundEnabled = true;
 
         function toggleSound() {
             // Create context if it doesn't exist yet
@@ -393,6 +406,7 @@
                     document.getElementById('sound-on-icon').classList.remove('hidden');
                     document.getElementById('sound-toggle').classList.replace('bg-red-800', 'bg-green-700');
                     document.getElementById('sound-toggle').classList.replace('border-red-600', 'border-green-500');
+                    document.getElementById('sound-toggle').title = "Click to Mute Alerts";
                     playBeep(); // Play a test beep so the user knows it works
                 });
             } else {
@@ -402,12 +416,21 @@
                 document.getElementById('sound-off-icon').classList.remove('hidden');
                 document.getElementById('sound-toggle').classList.replace('bg-green-700', 'bg-red-800');
                 document.getElementById('sound-toggle').classList.replace('border-green-500', 'border-red-600');
+                document.getElementById('sound-toggle').title = "Click to Unmute Alerts";
             }
         }
 
         function playBeep() {
-            if (!isSoundEnabled || !audioCtx) return;
-            if (audioCtx.state === 'suspended') audioCtx.resume();
+            if (!isSoundEnabled) return;
+            
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (audioCtx.state === 'suspended') {
+                // Try to resume, but catch the error if browser prevents autoplay without a click
+                audioCtx.resume().catch(() => console.log('Browser blocked autoplay sound pending user click.'));
+            }
             
             const osc = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
@@ -529,6 +552,9 @@
             // Create audio context on first user interaction if it hasn't been done
             if (!audioCtx && !isSoundEnabled) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
             }
             const cities = Object.keys(cityCoordinates);
             const randomCity = cities[Math.floor(Math.random() * cities.length)];
